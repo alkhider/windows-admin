@@ -1,0 +1,26 @@
+@page "/certificates"
+@inject CertificateService CertSvc
+
+<section class="card">
+    <p class="muted">Certificates expiring within 60 days (Current User and Local Machine stores).</p>
+    <table>
+        <thead><tr><th>Subject</th><th>Store</th><th>Expires</th><th>Days left</th></tr></thead>
+        <tbody>
+        @foreach (var cert in Items)
+        {
+            <tr class="@(cert.DaysLeft <= 30 ? "hot-row" : "")">
+                <td>@cert.Subject</td>
+                <td>@cert.Store</td>
+                <td>@cert.NotAfter.ToString("d")</td>
+                <td>@cert.DaysLeft</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
+
+@code {
+    private List<CertificateItem> Items = [];
+
+    protected override void OnInitialized() => Items = CertSvc.ListExpiring().ToList();
+}

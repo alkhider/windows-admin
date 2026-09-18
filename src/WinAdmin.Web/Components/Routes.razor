@@ -1,0 +1,18 @@
+﻿<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthGate>
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </AuthGate>
+    </Found>
+    <NotFound>
+        <AuthGate>
+            <LayoutView Layout="typeof(Layout.MainLayout)">
+                <section class="card">
+                    <h3>That page is not here</h3>
+                    <a class="btn" href="">Dashboard</a>
+                </section>
+            </LayoutView>
+        </AuthGate>
+    </NotFound>
+</Router>

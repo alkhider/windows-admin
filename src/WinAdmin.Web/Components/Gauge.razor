@@ -1,0 +1,135 @@
+<div class="gauge @($"gauge-{Size} tone-{Tone}")">
+    <svg class="gauge-svg" viewBox="0 0 200 176" role="img" aria-label="@($"{Label} {DisplayValue}")">
+        <defs>
+            <linearGradient id="@($"{Id}-fill")" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="@From" />
+                <stop offset="100%" stop-color="@To" />
+            </linearGradient>
+            <filter id="@($"{Id}-glow")" x="-40%" y="-40%" width="180%" height="180%">
+                <feGaussianBlur stdDeviation="2.4" result="blur" />
+                <feColorMatrix in="blur" type="matrix"
+                               values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.85 0" result="glow" />
+                <feMerge>
+                    <feMergeNode in="glow" />
+                    <feMergeNode in="SourceGraphic" />
+                </feMerge>
+            </filter>
+        </defs>
+        <path class="gauge-track" d="@TrackPath" />
+        @foreach (var tick in Ticks)
+        {
+            <line class="gauge-tick @(tick.Major ? "major" : "")" x1="@F(tick.X1)" y1="@F(tick.Y1)" x2="@F(tick.X2)" y2="@F(tick.Y2)" />
+        }
+        @if (Percent >= 1)
+        {
+            <path class="gauge-fill" d="@TrackPath" pathLength="100"
+                  stroke="url(#@($"{Id}-fill"))" filter="url(#@($"{Id}-glow"))"
+                  stroke-dasharray="@($"{Percent.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} 100")" />
+            <line class="gauge-needle" x1="100" y1="100" x2="@F(Needle.X)" y2="@F(Needle.Y)" />
+        }
+        <circle class="gauge-hub" cx="100" cy="100" r="5.5" />
+        <text class="gauge-value" x="100" y="78">@Primary</text>
+        <text class="gauge-unit" x="100" y="124">@(Value is null ? "no sensor" : Unit)</text>
+    </svg>
+    <div class="gauge-meta">
+        <div class="gauge-label">@Label</div>
+        @if (!string.IsNullOrWhiteSpace(Detail))
+        {
+            <div class="gauge-detail">@Detail</div>
+        }
+    </div>
+</div>
+
+@code {
+    private const double Cx = 100;
+    private const double Cy = 100;
+    private const double Radius = 72;
+    private const double StartDeg = 220;
+    private const double SweepDeg = 280;
+
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public double? Value { get; set; }
+    [Parameter] public double Max { get; set; } = 100;
+    [Parameter] public string Unit { get; set; } = "";
+    [Parameter] public string? Detail { get; set; }
+    [Parameter] public string Size { get; set; } = "md";
+    [Parameter] public string Scale { get; set; } = "util";
+
+    private string Id { get; } = "g" + Guid.NewGuid().ToString("N")[..10];
+    private string TrackPath => Arc(StartDeg, StartDeg + SweepDeg);
+    private double Percent => Value is null || Max <= 0 ? 0 : Math.Clamp(Value.Value / Max * 100, 0, 100);
+    private string Primary => Value is null ? "n/a" : DisplayNumber(Value.Value);
+    private string DisplayValue => Value is null ? "unavailable" : $"{Primary} {Unit}".Trim();
+    private string Tone
+    {
+        get
+        {
+            if (Value is null) return "idle";
+            if (Scale == "health")
+            {
+                return Percent >= 85 ? "good" : Percent >= 65 ? "warm" : "hot";
+            }
+            if (Scale == "temp")
+            {
+                return Value >= 85 ? "hot" : Value >= 70 ? "warm" : "cool";
+            }
+
+            return Percent >= 90 ? "hot" : Percent >= 75 ? "warm" : "good";
+        }
+    }
+
+    private string From => Tone switch
+    {
+        "hot" => "#ff7a8a",
+        "warm" => "#f0b429",
+        "cool" => "#7ee7d2",
+        _ => "#c9a36a"
+    };
+
+    private string To => Tone switch
+    {
+        "hot" => "#ff9a3c",
+        "warm" => "#e8c98a",
+        "cool" => "#8b7cff",
+        _ => "#7ee7d2"
+    };
+
+    private (double X, double Y) Needle => Point(StartDeg + SweepDeg * Percent / 100, Radius - 10);
+
+    private IEnumerable<(double X1, double Y1, double X2, double Y2, bool Major)> Ticks
+    {
+        get
+        {
+            for (var i = 0; i <= 20; i++)
+            {
+                var major = i % 5 == 0;
+                var angle = StartDeg + SweepDeg * i / 20d;
+                var outer = Point(angle, Radius + 2);
+                var inner = Point(angle, Radius - (major ? 10 : 5));
+                yield return (inner.X, inner.Y, outer.X, outer.Y, major);
+            }
+        }
+    }
+
+    private static string DisplayNumber(double value)
+    {
+        if (Math.Abs(value) >= 100) return value.ToString("0");
+        if (Math.Abs(value) >= 10) return value.ToString("0.#");
+        return value.ToString("0.##");
+    }
+
+    private static string Arc(double start, double end)
+    {
+        var a = Point(start, Radius);
+        var b = Point(end, Radius);
+        return $"M {F(a.X)} {F(a.Y)} A {F(Radius)} {F(Radius)} 0 1 1 {F(b.X)} {F(b.Y)}";
+    }
+
+    private static (double X, double Y) Point(double angleDeg, double r)
+    {
+        var rad = (angleDeg - 90) * Math.PI / 180;
+        return (Cx + r * Math.Cos(rad), Cy + r * Math.Sin(rad));
+    }
+
+    private static string F(double n) => n.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+}

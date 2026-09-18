@@ -1,0 +1,351 @@
+@page "/explorer"
+@inject FolderBrowseService Browse
+@inject LocationMemoryService Memory
+@inject SearchIndexService SearchSvc
+
+<div class="explorer-page">
+    <div class="explorer-bar">
+        @if (Frequent.Count == 0)
+        {
+            <span class="muted">Open folders to remember places. Use Save to pin one.</span>
+        }
+        @foreach (var loc in Frequent)
+        {
+            <button class="ex-chip @(loc.Pinned ? "pinned" : "")" title="@loc.Path" @onclick="() => OpenFrequent(loc.Path)">
+                @loc.Name
+            </button>
+        }
+        @if (!string.IsNullOrWhiteSpace(ActivePath))
+        {
+            <button class="ex-chip save" @onclick="PinActive">Save this location</button>
+        }
+    </div>
+
+    <div class="explorer">
+        <aside class="explorer-tree">
+            @foreach (var root in Tree)
+            {
+                <FolderTreeNode Node="root" SelectedPath="ActivePath" OnSelect="OnTreeSelect" Browse="Browse" />
+            }
+        </aside>
+
+        @RenderPane(PaneId.Left, Left)
+        @RenderPane(PaneId.Right, Right)
+    </div>
+
+    <div class="explorer-find">
+        <input class="ex-input grow" placeholder="Search the active folder with Windows index" @bind="IndexQuery" @bind:event="oninput" @onkeydown="OnIndexKey" />
+        <button class="ex-btn" @onclick="SearchActive">Search index</button>
+        <button class="ex-btn" @onclick="() => OpenInOs(ActivePath)">Open in Windows</button>
+    </div>
+</div>
+
+@if (IndexHits.Count > 0)
+{
+    <section class="card">
+        <h3>Indexed in this folder</h3>
+        <table>
+            <thead><tr><th>Path</th><th>Size</th></tr></thead>
+            <tbody>
+            @foreach (var hit in IndexHits)
+            {
+                <tr>
+                    <td>@hit.Path</td>
+                    <td>@StorageService.FormatBytes(hit.SizeBytes)</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+    private enum PaneId { Left, Right }
+
+    private List<TreeFolder> Tree = [];
+    private List<FrequentLocation> Frequent = [];
+    private readonly PaneState Left = new();
+    private readonly PaneState Right = new();
+    private PaneId Active = PaneId.Left;
+    private string IndexQuery = "";
+    private List<IndexedFileItem> IndexHits = [];
+    private string ActivePath => Active == PaneId.Left ? Left.Path : Right.Path;
+
+    protected override void OnInitialized()
+    {
+        Tree = BuildTree();
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var downloads = Path.Combine(home, "Downloads");
+        Navigate(PaneId.Left, Directory.Exists(downloads) ? downloads : home, remember: false, expandTree: false);
+        Navigate(PaneId.Right, home, remember: false, expandTree: false);
+        Active = PaneId.Left;
+        ExpandTreeTo(ActivePath);
+        Frequent = Memory.GetSuggestions().ToList();
+    }
+
+    private List<TreeFolder> BuildTree()
+    {
+        var roots = new List<TreeFolder>();
+        AddSpecial(roots, Environment.SpecialFolder.UserProfile, "Home");
+        AddSpecial(roots, Environment.SpecialFolder.Desktop, "Desktop");
+        AddSpecial(roots, Environment.SpecialFolder.MyDocuments, "Documents");
+        AddSpecial(roots, Environment.SpecialFolder.MyPictures, "Pictures");
+        var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        if (Directory.Exists(downloads) && roots.All(r => !r.Path.Equals(downloads, StringComparison.OrdinalIgnoreCase)))
+        {
+            roots.Add(new TreeFolder { Name = "Downloads", Path = downloads, MayHaveChildren = true });
+        }
+
+        foreach (var drive in Browse.ListDrives())
+        {
+            roots.Add(new TreeFolder { Name = drive.Name.Trim(), Path = drive.Path, IsDrive = true, MayHaveChildren = true });
+        }
+
+        return roots;
+    }
+
+    private static void AddSpecial(List<TreeFolder> roots, Environment.SpecialFolder folder, string name)
+    {
+        var path = Environment.GetFolderPath(folder);
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        roots.Add(new TreeFolder { Name = name, Path = path, MayHaveChildren = true });
+    }
+
+    private RenderFragment RenderPane(PaneId pane, PaneState state) => __builder =>
+    {
+        <section class="explorer-pane @(Active == pane ? "active-pane" : "")" @onclick="() => Active = pane">
+            <div class="pane-head">
+                <button class="ex-btn" @onclick="() => Up(pane)" @onclick:stopPropagation="true">Up</button>
+                <div class="crumbs">
+                    @foreach (var crumb in Crumbs(state.Path))
+                    {
+                        <button type="button" class="crumb" title="@crumb.Path" @onclick="() => Navigate(pane, crumb.Path)" @onclick:stopPropagation="true">@crumb.Name</button>
+                    }
+                </div>
+            </div>
+            <div class="pane-cols pane-head-row">
+                <span>Name</span>
+                <span>Date modified</span>
+            </div>
+            <div class="pane-list">
+                @foreach (var item in state.Items)
+                {
+                    <button type="button"
+                            class="pane-item pane-cols @(item.IsDirectory ? "dir" : "file") @(state.Selected == item.Path ? "selected" : "")"
+                            title="@item.Name"
+                            @ondblclick="() => OpenItem(pane, item)"
+                            @onclick="() => SelectItem(pane, item)">
+                        <span class="entry-name">
+                            <span class="ico @(item.IsDirectory ? "folder" : "file")"></span>
+                            <span class="entry-text">@item.Name</span>
+                        </span>
+                        <span class="entry-date">@FormatDate(item.Modified)</span>
+                    </button>
+                }
+            </div>
+            <div class="pane-foot">@state.Items.Count objects</div>
+        </section>
+    };
+
+    private void OnTreeSelect(string path) => Navigate(Active, path);
+
+    private void OpenFrequent(string path) => Navigate(Active, path);
+
+    private void PinActive()
+    {
+        Memory.Record(ActivePath);
+        Memory.Pin(ActivePath, true);
+        Frequent = Memory.GetSuggestions().ToList();
+    }
+
+    private void Navigate(PaneId pane, string path, bool remember = true, bool expandTree = true)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        var state = pane == PaneId.Left ? Left : Right;
+        state.Path = Path.GetFullPath(path);
+        state.Items = Browse.List(state.Path).ToList();
+        state.Selected = null;
+        Active = pane;
+        IndexHits = [];
+        if (expandTree)
+        {
+            ExpandTreeTo(state.Path);
+        }
+        if (remember)
+        {
+            Memory.Record(state.Path);
+            Frequent = Memory.GetSuggestions().ToList();
+        }
+    }
+
+    private void ExpandTreeTo(string path)
+    {
+        TreeFolder? best = null;
+        foreach (var root in Tree)
+        {
+            if (IsUnder(root.Path, path) && (best is null || root.Path.Length > best.Path.Length))
+            {
+                best = root;
+            }
+        }
+
+        if (best is not null)
+        {
+            ExpandIfOnPath(best, path);
+        }
+    }
+
+    private void ExpandIfOnPath(TreeFolder node, string path)
+    {
+        if (!IsUnder(node.Path, path))
+        {
+            return;
+        }
+
+        var atNode = PathsEqual(node.Path, path);
+        if (!node.Loaded)
+        {
+            node.Children = Browse.ListFolders(node.Path)
+                .Select(e => new TreeFolder { Name = e.Name, Path = e.Path, MayHaveChildren = true })
+                .ToList();
+            node.Loaded = true;
+        }
+
+        if (!atNode)
+        {
+            node.Expanded = true;
+            foreach (var child in node.Children)
+            {
+                ExpandIfOnPath(child, path);
+            }
+        }
+        else
+        {
+            node.Expanded = true;
+        }
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left).TrimEnd('\\'),
+                Path.GetFullPath(right).TrimEnd('\\'),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsUnder(string ancestor, string path)
+    {
+        try
+        {
+            var root = Path.GetFullPath(ancestor).TrimEnd('\\') + "\\";
+            var full = Path.GetFullPath(path).TrimEnd('\\') + "\\";
+            return full.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void Up(PaneId pane)
+    {
+        var state = pane == PaneId.Left ? Left : Right;
+        var parent = Browse.ParentOf(state.Path);
+        if (!string.IsNullOrWhiteSpace(parent))
+        {
+            Navigate(pane, parent);
+        }
+    }
+
+    private void OpenItem(PaneId pane, FolderEntry item)
+    {
+        if (item.IsDirectory)
+        {
+            Navigate(pane, item.Path);
+        }
+        else
+        {
+            Browse.Open(item.Path);
+        }
+    }
+
+    private void SelectItem(PaneId pane, FolderEntry item)
+    {
+        Active = pane;
+        var state = pane == PaneId.Left ? Left : Right;
+        state.Selected = item.Path;
+    }
+
+    private static IReadOnlyList<(string Name, string Path)> Crumbs(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return [];
+        }
+
+        try
+        {
+            var items = new List<(string Name, string Path)>();
+            var dir = new DirectoryInfo(Path.GetFullPath(path));
+            while (dir is not null)
+            {
+                var name = dir.Parent is null ? dir.FullName : dir.Name;
+                items.Add((name, dir.FullName));
+                dir = dir.Parent;
+            }
+
+            items.Reverse();
+            return items;
+        }
+        catch
+        {
+            return [(path, path)];
+        }
+    }
+
+    private async Task SearchActive()
+    {
+        if (string.IsNullOrWhiteSpace(IndexQuery))
+        {
+            IndexHits = [];
+            return;
+        }
+
+        IndexHits = (await SearchSvc.SearchAsync(IndexQuery, scopePath: ActivePath)).ToList();
+    }
+
+    private async Task OnIndexKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchActive();
+        }
+    }
+
+    private void OpenInOs(string path) => Browse.Open(path);
+
+    private static string FormatDate(DateTime? value) =>
+        value is { } dt ? dt.ToString("M/d/yyyy h:mm") : "";
+
+    private sealed class PaneState
+    {
+        public string Path { get; set; } = "";
+        public string? Selected { get; set; }
+        public List<FolderEntry> Items { get; set; } = [];
+    }
+}

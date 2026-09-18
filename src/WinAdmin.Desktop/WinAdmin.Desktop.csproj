@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RootNamespace>WinAdmin.Desktop</RootNamespace>
+    <AssemblyName>WindowsAdmin</AssemblyName>
+    <AssemblyTitle>Windows Admin</AssemblyTitle>
+    <Product>Windows Admin</Product>
+    <Description>Windows Admin desktop host</Description>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinAdmin.Core\WinAdmin.Core.csproj" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+  </ItemGroup>
+
+  <Target Name="BuildAndCopyPortal" AfterTargets="Build">
+    <MSBuild Projects="..\WinAdmin.Web\WinAdmin.Web.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
+    <ItemGroup>
+      <PortalFiles Include="..\WinAdmin.Web\bin\$(Configuration)\net9.0-windows\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PortalFiles)" DestinationFolder="$(OutputPath)portal\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

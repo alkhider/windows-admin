@@ -1,0 +1,47 @@
+<div class="tree-node">
+    <button type="button"
+            class="tree-row @(SelectedPath != null && SelectedPath.Equals(Node.Path, StringComparison.OrdinalIgnoreCase) ? "active" : "")"
+            title="@Node.Path"
+            @onclick="Select">
+        @if (Node.IsDrive || Node.MayHaveChildren)
+        {
+            <span class="tree-twist" @onclick="Toggle" @onclick:stopPropagation="true">@(Node.Expanded ? "-" : "+")</span>
+        }
+        else
+        {
+            <span class="tree-twist empty"></span>
+        }
+        <span class="ico @(Node.IsDrive ? "drive" : "folder")"></span>
+        <span class="tree-name">@Node.Name</span>
+    </button>
+    @if (Node.Expanded)
+    {
+        <div class="tree-children">
+            @foreach (var child in Node.Children)
+            {
+                <FolderTreeNode Node="child" SelectedPath="SelectedPath" OnSelect="OnSelect" Browse="Browse" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TreeFolder Node { get; set; } = new();
+    [Parameter] public string? SelectedPath { get; set; }
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+    [Parameter] public FolderBrowseService Browse { get; set; } = default!;
+
+    private async Task Select() => await OnSelect.InvokeAsync(Node.Path);
+
+    private void Toggle()
+    {
+        Node.Expanded = !Node.Expanded;
+        if (Node.Expanded && !Node.Loaded)
+        {
+            Node.Children = Browse.ListFolders(Node.Path)
+                .Select(e => new TreeFolder { Name = e.Name, Path = e.Path, MayHaveChildren = true })
+                .ToList();
+            Node.Loaded = true;
+        }
+    }
+}

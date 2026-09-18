@@ -1,0 +1,174 @@
+@page "/updates"
+@inject WindowsUpdateService UpdateSvc
+@inject TransferJobService TransferSvc
+@inject JobService Jobs
+
+<div class="toolbar">
+    <button class="btn" @onclick="Scan" disabled="@Busy">Scan for updates</button>
+    <button class="btn" @onclick="InstallSelected" disabled="@(Busy || Selected.Count == 0)">Install selected</button>
+    <button class="btn accent" @onclick="InstallAll" disabled="@(Busy || Available.Count == 0)">Install all</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+<section class="grid-2">
+    <article class="card">
+        <div class="card-head">
+            <h3>Available updates</h3>
+            <span class="muted">@Available.Count found</span>
+        </div>
+        @if (Scanning)
+        {
+            <div class="loading">Talking to Windows Update Agent… this stays in the portal, not a popup.</div>
+        }
+        else if (Available.Count == 0)
+        {
+            <p class="muted">No pending updates, or scan to refresh the list.</p>
+        }
+        else
+        {
+            <div class="list">
+                @foreach (var update in Available)
+                {
+                    <label class="list-item">
+                        <input type="checkbox" checked="@Selected.Contains(update.Id)"
+                               @onchange="e => Toggle(update.Id, e.Value is true)" />
+                        <div>
+                            <strong>@update.Title</strong>
+                            <div class="muted">@update.Kb · @update.Severity · @StorageService.FormatBytes(update.SizeBytes) @(update.IsDownloaded ? "· downloaded" : "")</div>
+                        </div>
+                    </label>
+                }
+            </div>
+        }
+    </article>
+    <article class="card">
+        <h3>Recent history</h3>
+        @if (History.Count == 0)
+        {
+            <p class="muted">History appears after a scan.</p>
+        }
+        else
+        {
+            <table>
+                <thead><tr><th>Date</th><th>Update</th><th>Result</th></tr></thead>
+                <tbody>
+                @foreach (var item in History)
+                {
+                    <tr>
+                        <td>@item.Date.ToString("g")</td>
+                        <td>@item.Title</td>
+                        <td>@item.Result</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </article>
+    <article class="card">
+        <h3>Background transfers</h3>
+        <p class="muted">BITS jobs and Delivery Optimization — useful when a download looks stuck.</p>
+        @if (BitsJobs.Count == 0 && DoStatus.Count == 0)
+        {
+            <p class="muted">No active BITS jobs. Load to refresh DO status.</p>
+        }
+        else
+        {
+            <table>
+                <thead><tr><th>Name</th><th>State</th><th>Bytes</th></tr></thead>
+                <tbody>
+                @foreach (var job in BitsJobs)
+                {
+                    <tr>
+                        <td>@job.Name</td>
+                        <td>@job.State</td>
+                        <td>@StorageService.FormatBytes(job.BytesTransferred)</td>
+                    </tr>
+                }
+                @foreach (var job in DoStatus)
+                {
+                    <tr>
+                        <td>@job.Name</td>
+                        <td>@job.State</td>
+                        <td>—</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+        <button class="btn ghost" @onclick="LoadTransfers">Refresh transfers</button>
+    </article>
+</section>
+
+@code {
+    private List<TransferJobItem> BitsJobs = [];
+    private List<TransferJobItem> DoStatus = [];
+    private List<WindowsUpdateItem> Available = [];
+    private List<UpdateHistoryItem> History = [];
+    private readonly HashSet<string> Selected = [];
+    private bool Scanning;
+    private bool Busy => Scanning || Jobs.Recent.Any(j => j.State == "Running");
+    private string? Message;
+    private bool Ok;
+
+    protected override async Task OnInitializedAsync() => await LoadTransfers();
+
+    private async Task LoadTransfers()
+    {
+        BitsJobs = (await TransferSvc.ListBitsJobsAsync()).ToList();
+        DoStatus = (await TransferSvc.ListDeliveryOptimizationAsync()).ToList();
+    }
+
+    private void Toggle(string id, bool on)
+    {
+        if (on) Selected.Add(id); else Selected.Remove(id);
+    }
+
+    private async Task Scan()
+    {
+        Scanning = true;
+        Message = null;
+        try
+        {
+            Available = (await UpdateSvc.GetAvailableAsync()).ToList();
+            History = (await UpdateSvc.GetHistoryAsync()).ToList();
+            Selected.Clear();
+            Message = Available.Count == 0 ? "This PC is up to date." : $"Found {Available.Count} update(s).";
+            Ok = true;
+        }
+        catch (Exception ex)
+        {
+            Message = ex.Message;
+            Ok = false;
+        }
+        finally
+        {
+            Scanning = false;
+        }
+    }
+
+    private Task InstallSelected() => QueueInstall("Installing selected updates", Selected.ToList());
+
+    private Task InstallAll() => QueueInstall("Installing all updates", []);
+
+    private Task QueueInstall(string name, List<string> ids)
+    {
+        Message = "Install started in the background. Keep this window open.";
+        Ok = true;
+        Jobs.Start(name, async (progress, _) =>
+        {
+            var result = ids.Count == 0
+                ? await UpdateSvc.InstallAllAsync(progress)
+                : await UpdateSvc.InstallAsync(ids, progress);
+            await InvokeAsync(() =>
+            {
+                Message = result.Message;
+                Ok = result.Ok;
+            });
+        });
+        return Task.CompletedTask;
+    }
+}

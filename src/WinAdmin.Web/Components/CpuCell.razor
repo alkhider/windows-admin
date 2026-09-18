@@ -1,0 +1,12 @@
+<div class="cpu-cell">
+    <div class="cpu-cell-top">
+        <span>@Percent.ToString("0.0")%</span>
+    </div>
+    <div class="reading-bar slim">
+        <span class="@(Percent >= 90 ? "hot" : Percent >= 60 ? "warm" : "")" style="width:@($"{Math.Clamp(Percent, 0, 100).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}%")"></span>
+    </div>
+</div>
+
+@code {
+    [Parameter] public double Percent { get; set; }
+}

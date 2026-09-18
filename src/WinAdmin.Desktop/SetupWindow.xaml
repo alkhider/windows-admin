@@ -1,0 +1,87 @@
+<Window x:Class="WinAdmin.Desktop.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Windows Admin setup"
+        Width="760"
+        Height="640"
+        MinWidth="560"
+        MinHeight="500"
+        WindowStartupLocation="CenterScreen"
+        Background="#07080f"
+        ResizeMode="CanResize">
+    <DockPanel Margin="24">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button x:Name="RecheckButton" Content="Check again" Width="120" Height="36" Margin="0,0,10,0" Click="Recheck_Click"/>
+            <Button x:Name="ExitButton" Content="Exit" Width="90" Height="36" Margin="0,0,10,0" Click="Exit_Click"/>
+            <Button x:Name="TryRunButton" Content="Try to run" Width="120" Height="36" Margin="0,0,10,0" Click="TryRun_Click"/>
+            <Button x:Name="ContinueButton" Content="Continue" Width="120" Height="36" Click="Continue_Click"/>
+        </StackPanel>
+        <StackPanel>
+            <TextBlock Text="Windows Admin" FontSize="26" FontWeight="SemiBold" Foreground="#f6f1ea"/>
+            <TextBlock x:Name="IntroText"
+                       Text="Checking this PC…"
+                       TextWrapping="Wrap"
+                       Margin="0,10,0,16"
+                       Foreground="#b9b1c9"/>
+            <TextBlock Text="Support libraries" FontSize="14" FontWeight="SemiBold" Foreground="#f6f1ea" Margin="0,0,0,8"/>
+            <ListBox x:Name="LibraryList"
+                     Background="#121226"
+                     BorderBrush="#3a3550"
+                     Foreground="#f6f1ea"
+                     Height="360"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#f6f1ea" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Why}" Foreground="#b9b1c9" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                <TextBlock Text="{Binding Status}" Margin="0,4,0,0" TextWrapping="Wrap">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#ff7a8a"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Installed}" Value="True">
+                                                    <Setter Property="Foreground" Value="#5ee0a8"/>
+                                                </DataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Installed}" Value="False"/>
+                                                        <Condition Binding="{Binding Required}" Value="False"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Foreground" Value="#c9a36a"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Get this"
+                                    VerticalAlignment="Center"
+                                    Margin="12,0,0,0"
+                                    Padding="12,6"
+                                    Click="GetThis_Click"
+                                    Tag="{Binding}">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Installed}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </StackPanel>
+    </DockPanel>
+</Window>

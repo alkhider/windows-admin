@@ -1,0 +1,139 @@
+@page "/clock"
+@implements IDisposable
+@inject WindowsClockService ClockSvc
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+<section class="hero">
+    <div>
+        <div class="eyebrow">Windows clock</div>
+        <div class="clock-now">@Now.ToString("HH:mm:ss")</div>
+        <p class="lede">@Now.ToString("dddd, dd MMMM yyyy")</p>
+        <p class="muted">@Status.TimeZoneName · UTC @Status.UtcTime.ToString("HH:mm:ss")</p>
+    </div>
+</section>
+
+<section class="grid-2">
+    <article class="card">
+        <h3>Set date and time</h3>
+        <p class="muted">Applied directly to Windows. No Settings popup and no permission prompt.</p>
+        <div class="form-grid">
+            <label class="field">
+                Date
+                <input type="date" @bind="DatePart" @bind:format="yyyy-MM-dd" />
+            </label>
+            <label class="field">
+                Time
+                <input type="time" step="1" @bind="TimePart" />
+            </label>
+        </div>
+        <div class="actions">
+            <button class="btn accent" @onclick="ApplyDateTime">Apply date and time</button>
+            <button class="btn ghost" @onclick="UseNow">Use current time</button>
+        </div>
+    </article>
+    <article class="card">
+        <h3>Time zone</h3>
+        <label class="field">
+            Filter
+            <input class="search" placeholder="Search time zones" @bind="ZoneFilter" @bind:event="oninput" />
+        </label>
+        <label class="field">
+            Time zone
+            <select @bind="TimeZoneId">
+                @foreach (var zone in VisibleZones)
+                {
+                    <option value="@zone.Id">@zone.Name</option>
+                }
+            </select>
+        </label>
+        <div class="actions">
+            <button class="btn" @onclick="ApplyTimeZone">Apply time zone</button>
+            <button class="btn ghost" @onclick="SyncInternet">Sync from internet</button>
+        </div>
+    </article>
+</section>
+
+@code {
+    private ClockStatus Status = new();
+    private List<TimeZoneChoice> Zones = [];
+    private DateTime DatePart = DateTime.Today;
+    private TimeOnly TimePart = TimeOnly.FromDateTime(DateTime.Now);
+    private string TimeZoneId = TimeZoneInfo.Local.Id;
+    private string ZoneFilter = "";
+    private string? Message;
+    private bool Ok;
+    private DateTime Now = DateTime.Now;
+    private readonly CancellationTokenSource _cts = new();
+
+    private IEnumerable<TimeZoneChoice> VisibleZones =>
+        Zones.Where(z => string.IsNullOrWhiteSpace(ZoneFilter) ||
+                         z.Name.Contains(ZoneFilter, StringComparison.OrdinalIgnoreCase) ||
+                         z.Id.Contains(ZoneFilter, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnInitialized()
+    {
+        RefreshClock();
+        Zones = ClockSvc.GetTimeZones().ToList();
+        _ = TickAsync();
+    }
+
+    private void RefreshClock()
+    {
+        Status = ClockSvc.GetStatus();
+        Now = Status.LocalTime;
+        DatePart = Now.Date;
+        TimePart = TimeOnly.FromDateTime(Now);
+        TimeZoneId = Status.TimeZoneId;
+    }
+
+    private void UseNow() => RefreshClock();
+
+    private async Task TickAsync()
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(_cts.Token))
+            {
+                Now = DateTime.Now;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // page disposed
+        }
+    }
+
+    private void ApplyDateTime()
+    {
+        var local = DatePart.Date.Add(TimePart.ToTimeSpan());
+        var result = ClockSvc.SetDateTime(local);
+        Message = result.Message;
+        Ok = result.Ok;
+        RefreshClock();
+    }
+
+    private async Task ApplyTimeZone()
+    {
+        var result = await ClockSvc.SetTimeZoneAsync(TimeZoneId);
+        Message = result.Message;
+        Ok = result.Ok;
+        RefreshClock();
+    }
+
+    private async Task SyncInternet()
+    {
+        var result = await ClockSvc.SyncFromInternetAsync();
+        Message = result.Message;
+        Ok = result.Ok;
+        await Task.Delay(800);
+        RefreshClock();
+    }
+
+    public void Dispose() => _cts.Cancel();
+}

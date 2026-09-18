@@ -1,0 +1,61 @@
+@page "/scheduled-tasks"
+@inject ScheduledTaskService TaskSvc
+
+<div class="toolbar">
+    <button class="btn ghost" @onclick="Load">Refresh</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+<section class="card">
+    <table>
+        <thead><tr><th>Name</th><th>Path</th><th>State</th><th>Trigger</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var task in Tasks)
+        {
+            <tr>
+                <td>@task.Name</td>
+                <td class="muted">@task.Path</td>
+                <td>@task.State</td>
+                <td>@task.Trigger</td>
+                <td>
+                    <button class="btn ghost" @onclick="() => Run(task.Path)">Run</button>
+                    <button class="btn ghost" @onclick="() => Toggle(task.Path, true)">Enable</button>
+                    <button class="btn ghost danger" @onclick="() => Toggle(task.Path, false)">Disable</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
+
+@code {
+    private List<ScheduledTaskItem> Tasks = [];
+    private string? Message;
+    private bool Ok;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        Tasks = (await TaskSvc.ListAsync()).ToList();
+    }
+
+    private async Task Run(string path)
+    {
+        var result = await TaskSvc.RunAsync(path);
+        Message = result.Message;
+        Ok = result.Ok;
+    }
+
+    private async Task Toggle(string path, bool enable)
+    {
+        var result = await TaskSvc.EnableAsync(path, enable);
+        Message = result.Message;
+        Ok = result.Ok;
+        await Load();
+    }
+}

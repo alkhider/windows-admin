@@ -1,0 +1,79 @@
+@page "/login"
+@layout LoginLayout
+@inject PortalAuthService Auth
+@inject NavigationManager Nav
+
+<PageTitle>Windows Admin · Unlock</PageTitle>
+
+<section class="login-card @(Shaking ? "shake" : "")">
+    <div class="login-mark">WA</div>
+    <h2>Windows Admin</h2>
+    <p class="muted">This PC is locked. Enter the password to open the portal.</p>
+    <form class="login-form" @onsubmit="Unlock" @onsubmit:preventDefault>
+        <label class="label" for="wa-pass">Password</label>
+        <input id="wa-pass"
+               class="search wide"
+               type="password"
+               autocomplete="current-password"
+               placeholder="Password"
+               @bind="Password"
+               @bind:event="oninput"
+               @ref="PassBox" />
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <div class="banner warn">@Error</div>
+        }
+        <button class="btn accent" type="submit" disabled="@Busy">Unlock</button>
+    </form>
+</section>
+
+@code {
+    private string Password = "";
+    private string? Error;
+    private bool Busy;
+    private bool Shaking;
+    private ElementReference PassBox;
+
+    protected override void OnInitialized()
+    {
+        if (Auth.IsSignedIn)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await PassBox.FocusAsync();
+            }
+            catch
+            {
+                // focus is optional
+            }
+        }
+    }
+
+    private async Task Unlock()
+    {
+        Busy = true;
+        Error = null;
+        Shaking = false;
+        await Task.Delay(120);
+        if (Auth.TrySignIn(Password))
+        {
+            Password = "";
+            Nav.NavigateTo("/", replace: true);
+            return;
+        }
+
+        Password = "";
+        Error = "That password is not correct.";
+        Shaking = true;
+        Busy = false;
+        await PassBox.FocusAsync();
+    }
+}

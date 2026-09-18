@@ -1,0 +1,256 @@
+@page "/check"
+@inject CheckFixService CheckSvc
+@inject JobService Jobs
+@inject NavigationManager Nav
+
+<section class="magic-hero card">
+    <div class="magic-copy">
+        <div class="eyebrow">Windows-style health check</div>
+        <h2>Check this PC</h2>
+        <p class="lede">One pass over storage, protection, updates, performance, and startup. Each finding has a Fix option, same idea as the Windows Performance troubleshooter.</p>
+        @if (Scan is not null)
+        {
+            <p class="muted">Last check @Scan.At.ToString("t") · @Scan.IssueCount to review · @Scan.PassedCount looking good</p>
+        }
+    </div>
+    <button class="magic-btn @(Busy ? "busy" : "")" @onclick="RunScan" disabled="@Busy">
+        @(Busy ? Step : "Check")
+    </button>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+@if (Busy && Steps.Count > 0)
+{
+    <section class="card">
+        <h3>Checking…</h3>
+        <ul class="check-steps">
+            @foreach (var item in Steps)
+            {
+                <li>@item</li>
+            }
+        </ul>
+    </section>
+}
+
+@if (Scan is not null && !Busy)
+{
+    <section class="grid-2">
+        <article class="card">
+            <div class="label">Score</div>
+            <div class="value">@Scan.Score</div>
+            <div class="muted">@Scan.Label</div>
+        </article>
+        <article class="card">
+            <div class="card-head">
+                <h3>Fix options</h3>
+                <button class="btn accent" @onclick="FixSafe" disabled="@(!HasSafe)">Fix all safe items</button>
+            </div>
+            <p class="muted">Safe items run silently. Restart, update install, and ending a process ask first.</p>
+        </article>
+    </section>
+
+    @if (Issues.Any())
+    {
+        <section class="card">
+            <h3>Findings</h3>
+            <div class="check-list">
+                @foreach (var item in Issues)
+                {
+                    <div class="check-item @item.Severity">
+                        <div>
+                            <div class="label">@item.Category · @item.Severity</div>
+                            <strong>@item.Title</strong>
+                            <div class="muted">@item.Detail</div>
+                            @if (!string.IsNullOrWhiteSpace(item.ResultMessage))
+                            {
+                                <div class="muted">@item.ResultMessage</div>
+                            }
+                        </div>
+                        <div class="check-actions">
+                            @if (item.State == "Fixed")
+                            {
+                                <span class="muted">Fixed</span>
+                            }
+                            else if (item.State == "Working")
+                            {
+                                <span class="muted">Working…</span>
+                            }
+                            else if (item.State == "Skipped")
+                            {
+                                <span class="muted">Skipped</span>
+                            }
+                            else if (ConfirmId == item.Id)
+                            {
+                                <button class="btn accent" @onclick="() => Fix(item, confirmed: true)">Confirm</button>
+                                <button class="btn ghost" @onclick="() => ConfirmId = null">Cancel</button>
+                            }
+                            else if (item.Action is "open-processes" or "open-tasks" or "open-events")
+                            {
+                                <button class="btn" @onclick="() => Open(item)">@item.ActionLabel</button>
+                                <button class="btn ghost" @onclick="() => Skip(item)">Skip</button>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(item.Action))
+                            {
+                                <button class="btn accent" @onclick="() => Fix(item, confirmed: false)" disabled="@Fixing">@item.ActionLabel</button>
+                                <button class="btn ghost" @onclick="() => Skip(item)">Skip</button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </section>
+    }
+
+    @if (Passed.Any())
+    {
+        <section class="card">
+            <h3>Looking good</h3>
+            <ul class="findings">
+                @foreach (var item in Passed)
+                {
+                    <li>@item.Title — @item.Detail</li>
+                }
+            </ul>
+        </section>
+    }
+}
+
+@code {
+    private CheckScanResult? Scan;
+    private readonly List<string> Steps = [];
+    private string Step = "Check";
+    private bool Busy;
+    private bool Fixing;
+    private string? ConfirmId;
+    private string? Message;
+    private bool Ok;
+
+    private IEnumerable<CheckFinding> Issues =>
+        Scan?.Findings.Where(f => f.Severity is "issue" or "warn") ?? [];
+
+    private IEnumerable<CheckFinding> Passed =>
+        Scan?.Findings.Where(f => f.Severity == "ok") ?? [];
+
+    private bool HasSafe => Scan is not null && Scan.Findings.Any(CheckSvc.CanAutoFix);
+
+    private async Task RunScan()
+    {
+        Busy = true;
+        Fixing = false;
+        ConfirmId = null;
+        Message = null;
+        Steps.Clear();
+        Step = "Checking…";
+        var progress = new Progress<string>(s =>
+        {
+            Steps.Add(s);
+            Step = s;
+            _ = InvokeAsync(StateHasChanged);
+        });
+        try
+        {
+            Scan = await CheckSvc.ScanAsync(progress);
+            Message = Scan.IssueCount == 0
+                ? "No issues to fix. This PC looks in good shape."
+                : $"{Scan.IssueCount} finding(s) with a Fix option.";
+            Ok = Scan.IssueCount == 0;
+        }
+        catch (Exception ex)
+        {
+            Message = ex.Message;
+            Ok = false;
+        }
+        finally
+        {
+            Busy = false;
+            Step = "Check";
+        }
+    }
+
+    private void Skip(CheckFinding item)
+    {
+        item.State = "Skipped";
+        item.ResultMessage = "Left unchanged.";
+    }
+
+    private void Open(CheckFinding item)
+    {
+        var path = item.Action switch
+        {
+            "open-processes" => "processes",
+            "open-tasks" => "tasks",
+            "open-events" => "events",
+            _ => "performance"
+        };
+        Nav.NavigateTo(path);
+    }
+
+    private async Task Fix(CheckFinding item, bool confirmed)
+    {
+        if (item.NeedsConfirm && !confirmed)
+        {
+            ConfirmId = item.Id;
+            return;
+        }
+
+        ConfirmId = null;
+        item.State = "Working";
+        Fixing = true;
+        Message = item.ActionLabel + "…";
+        Ok = true;
+
+        if (item.Action is "install-updates" or "storage-sense" or "cleanup-temp")
+        {
+            Jobs.Start(item.ActionLabel, async (progress, _) =>
+            {
+                try
+                {
+                    var result = await CheckSvc.FixAsync(item, progress);
+                    await InvokeAsync(() => ApplyResult(item, result));
+                }
+                catch (Exception ex)
+                {
+                    await InvokeAsync(() => ApplyResult(item, OperationResult.Fail(ex.Message)));
+                }
+            });
+            return;
+        }
+
+        var direct = await CheckSvc.FixAsync(item);
+        ApplyResult(item, direct);
+    }
+
+    private async Task FixSafe()
+    {
+        if (Scan is null)
+        {
+            return;
+        }
+
+        Fixing = true;
+        foreach (var item in Scan.Findings.Where(CheckSvc.CanAutoFix).ToList())
+        {
+            item.State = "Working";
+            StateHasChanged();
+            var result = await CheckSvc.FixAsync(item);
+            ApplyResult(item, result);
+        }
+
+        Message = "Safe fixes finished. Review anything that still needs a confirm.";
+        Ok = true;
+        Fixing = false;
+    }
+
+    private void ApplyResult(CheckFinding item, OperationResult result)
+    {
+        item.State = result.Ok ? "Fixed" : "Failed";
+        item.ResultMessage = result.Message;
+        Message = result.Message;
+        Ok = result.Ok;
+        Fixing = false;
+    }
+}

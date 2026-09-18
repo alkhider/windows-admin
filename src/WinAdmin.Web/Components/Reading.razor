@@ -1,0 +1,28 @@
+<div class="reading @($"tone-{Tone}")">
+    <div class="reading-label">@Label</div>
+    <div class="reading-row">
+        <div class="reading-value">@Primary</div>
+        <div class="reading-unit">@Unit</div>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Detail))
+    {
+        <div class="reading-detail">@Detail</div>
+    }
+    @if (Bar is not null)
+    {
+        <div class="reading-bar">
+            <span style="width:@($"{Bar.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}%")"></span>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public string Unit { get; set; } = "";
+    [Parameter] public string? Detail { get; set; }
+    [Parameter] public double? Bar { get; set; }
+    [Parameter] public string Tone { get; set; } = "good";
+
+    private string Primary => string.IsNullOrWhiteSpace(Value) ? "—" : Value;
+}

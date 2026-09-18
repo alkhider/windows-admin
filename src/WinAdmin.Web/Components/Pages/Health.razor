@@ -1,0 +1,88 @@
+@page "/health"
+@inject HealthService HealthSvc
+
+@if (Report is null)
+{
+    <div class="panel loading">Building the health report…</div>
+}
+else
+{
+    <div class="toolbar">
+        <button class="btn" @onclick="Refresh">Rebuild report</button>
+        <a class="btn ghost" href="/api/health/report.html" target="_blank">Open HTML report</a>
+        <a class="btn ghost" href="/api/health/report.json" target="_blank">Download JSON</a>
+    </div>
+
+    <section class="hero">
+        <div class="hero-score">
+            <Gauge Label="Health" Value="Report.HealthScore" Unit="/100" Size="sm" Detail="@Report.HealthLabel" Scale="health" />
+        </div>
+        <div>
+            <h2>@Report.ComputerName health snapshot</h2>
+            <p class="lede">Generated @Report.GeneratedAt.ToString("f")</p>
+            <p class="muted">@Report.Os.Caption @Report.Os.Architecture · build @Report.Os.Build · installed @Report.Os.InstallDate</p>
+            <p class="muted">@Report.Hardware.Manufacturer @Report.Hardware.Model · @Report.Hardware.Processor</p>
+        </div>
+    </section>
+
+    <section class="grid-2">
+        <article class="card">
+            <h3>Findings</h3>
+            <ul class="findings">
+                @foreach (var finding in Report.Findings)
+                {
+                    <li>@finding</li>
+                }
+            </ul>
+        </article>
+        <article class="card">
+            <h3>Core services</h3>
+            <table>
+                <thead><tr><th>Service</th><th>Status</th><th>Start</th></tr></thead>
+                <tbody>
+                @foreach (var service in Report.CriticalServices)
+                {
+                    <tr>
+                        <td>@service.DisplayName</td>
+                        <td>@service.Status</td>
+                        <td>@service.StartType</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </article>
+    </section>
+
+    <section class="card">
+        <h3>Recent system errors</h3>
+        @if (Report.RecentErrors.Count == 0)
+        {
+            <p class="muted">No recent error events were readable.</p>
+        }
+        else
+        {
+            <table>
+                <thead><tr><th>Time</th><th>Source</th><th>Message</th></tr></thead>
+                <tbody>
+                @foreach (var item in Report.RecentErrors)
+                {
+                    <tr>
+                        <td>@item.Time.ToString("g")</td>
+                        <td>@item.Source</td>
+                        <td>@item.Message</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+    private HealthReport? Report;
+    private string ScoreClass => Report is null ? "" : Report.HealthScore >= 85 ? "good" : Report.HealthScore >= 65 ? "ok" : "bad";
+
+    protected override void OnInitialized() => Report = HealthSvc.GetReport();
+
+    private void Refresh() => Report = HealthSvc.GetReport();
+}

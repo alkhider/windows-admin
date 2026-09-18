@@ -1,0 +1,179 @@
+@page "/storage"
+@inject StorageService StorageSvc
+@inject StorageSenseService SenseSvc
+@inject JobService Jobs
+
+@if (Overview is null)
+{
+    <div class="panel loading">Measuring disks and indexed files…</div>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(Message))
+    {
+        <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(Overview.IndexStatus))
+    {
+        <div class="banner warn">@Overview.IndexStatus</div>
+    }
+
+    <section class="grid-3">
+        @foreach (var drive in Overview.Drives)
+        {
+            <article class="card">
+                <div class="label">@drive.Name @drive.Label</div>
+                <div class="value">@drive.UsedPercent%</div>
+                <div class="meter"><span class="@(drive.UsedPercent >= 90 ? "hot" : "")" style="width:@drive.UsedPercent%"></span></div>
+                <div class="muted">@StorageService.FormatBytes(drive.FreeBytes) free · @drive.Format</div>
+            </article>
+        }
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <h3>Storage Sense</h3>
+            <span class="muted">Primary cleanup path — no Disk Cleanup popups</span>
+        </div>
+        <div class="grid-3">
+            <label class="list-item">
+                <input type="checkbox" @bind="SenseEnabled" />
+                <div><strong>Enable Storage Sense</strong></div>
+            </label>
+            <label class="list-item">
+                <span>Recycle retention (days)</span>
+                <input type="number" min="0" max="365" @bind="RecycleDays" />
+            </label>
+            <label class="list-item">
+                <span>Downloads retention (days, 0 = never)</span>
+                <input type="number" min="0" max="365" @bind="DownloadsDays" />
+            </label>
+        </div>
+        <div class="actions">
+            <button class="btn" @onclick="SaveSense" disabled="@Busy">Save policy</button>
+            <button class="btn accent" @onclick="RunSense" disabled="@Busy">Run Storage Sense now</button>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <h3>Optional manual cleanup</h3>
+            <span class="muted">About @StorageService.FormatBytes(Overview.ReclaimableBytes)</span>
+        </div>
+        <div class="list">
+            @foreach (var target in Overview.CleanupTargets)
+            {
+                <label class="list-item">
+                    <input type="checkbox" disabled="@(!target.CanClean)" checked="@Selected.Contains(target.Id)"
+                           @onchange="e => Toggle(target.Id, e.Value is true)" />
+                    <div>
+                        <strong>@target.Name</strong>
+                        <div class="muted">@target.Description · @StorageService.FormatBytes(target.SizeBytes)</div>
+                    </div>
+                </label>
+            }
+        </div>
+        <div class="actions">
+            <button class="btn accent" @onclick="Clean" disabled="@(Busy || Selected.Count == 0)">Clean selected</button>
+            <button class="btn ghost" @onclick="Refresh" disabled="@Busy">Recalculate</button>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <h3>Largest indexed files</h3>
+            <a class="btn ghost" href="search">Search index</a>
+        </div>
+        <table>
+            <thead><tr><th>Path</th><th>Size</th></tr></thead>
+            <tbody>
+            @foreach (var folder in Overview.LargeFolders)
+            {
+                <tr>
+                    <td>@folder.Path</td>
+                    <td>@StorageService.FormatBytes(folder.SizeBytes)</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+    private StorageOverview? Overview;
+    private readonly HashSet<string> Selected = [];
+    private string? Message;
+    private bool Ok;
+    private bool SenseEnabled = true;
+    private int RecycleDays = 30;
+    private int DownloadsDays;
+    private bool Busy => Jobs.Recent.Any(j => j.State == "Running");
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        Overview = await StorageSvc.GetOverviewAsync();
+        var sense = SenseSvc.GetSettings();
+        SenseEnabled = sense.Enabled;
+        RecycleDays = sense.RecycleDays;
+        DownloadsDays = sense.DownloadsDays;
+        Selected.Clear();
+        foreach (var target in Overview.CleanupTargets.Where(t => t.CanClean && t.Id != "prefetch" && t.SizeBytes > 0))
+        {
+            Selected.Add(target.Id);
+        }
+    }
+
+    private async Task Refresh() => await Load();
+
+    private void Toggle(string id, bool on)
+    {
+        if (on) Selected.Add(id); else Selected.Remove(id);
+    }
+
+    private void SaveSense()
+    {
+        var result = SenseSvc.SaveSettings(new StorageSenseSettings
+        {
+            Enabled = SenseEnabled,
+            RecycleDays = RecycleDays,
+            DownloadsDays = DownloadsDays
+        });
+        Message = result.Message;
+        Ok = result.Ok;
+    }
+
+    private void RunSense()
+    {
+        Message = "Starting Storage Sense…";
+        Ok = true;
+        Jobs.Start("Storage Sense", async (_, _) =>
+        {
+            var result = await SenseSvc.RunCleanupAsync();
+            await InvokeAsync(() =>
+            {
+                Message = result.Message;
+                Ok = result.Ok;
+            });
+        });
+    }
+
+    private void Clean()
+    {
+        var ids = Selected.ToList();
+        Message = "Cleaning selected locations in the background.";
+        Ok = true;
+        Jobs.Start("Storage cleanup", async (progress, _) =>
+        {
+            var result = await Task.Run(() => StorageSvc.Clean(ids, progress));
+            await InvokeAsync(async () =>
+            {
+                Message = result.Message;
+                Ok = result.Ok;
+                await Load();
+            });
+        });
+    }
+}
+

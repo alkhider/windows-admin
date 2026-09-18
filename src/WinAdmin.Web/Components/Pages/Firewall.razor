@@ -1,0 +1,59 @@
+@page "/firewall"
+@inject FirewallService FirewallSvc
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+<section class="card">
+    <p class="muted">Active profile(s): <strong>@Profile</strong>. Existing rules only — enable or disable without opening Windows Security popups.</p>
+    <table>
+        <thead><tr><th>Name</th><th>Direction</th><th>Action</th><th>Enabled</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var rule in Rules)
+        {
+            <tr>
+                <td>@rule.Name</td>
+                <td>@rule.Direction</td>
+                <td>@rule.Action</td>
+                <td>@(rule.Enabled ? "Yes" : "No")</td>
+                <td>
+                    @if (ConfirmRule == rule.Name)
+                    {
+                        <button class="btn danger" @onclick="() => Set(rule.Name, !rule.Enabled)">Confirm</button>
+                        <button class="btn ghost" @onclick="() => ConfirmRule = null">Cancel</button>
+                    }
+                    else
+                    {
+                        <button class="btn ghost" @onclick="() => ConfirmRule = rule.Name">@(rule.Enabled ? "Disable" : "Enable")</button>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
+
+@code {
+    private string Profile = "";
+    private List<FirewallRuleItem> Rules = [];
+    private string? ConfirmRule;
+    private string? Message;
+    private bool Ok;
+
+    protected override void OnInitialized()
+    {
+        Profile = FirewallSvc.GetProfileSummary();
+        Rules = FirewallSvc.ListRules().ToList();
+    }
+
+    private void Set(string name, bool enabled)
+    {
+        ConfirmRule = null;
+        var result = FirewallSvc.SetRuleEnabled(name, enabled);
+        Message = result.Message;
+        Ok = result.Ok;
+        Rules = FirewallSvc.ListRules().ToList();
+    }
+}

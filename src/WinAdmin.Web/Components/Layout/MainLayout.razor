@@ -1,0 +1,152 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject JobService Jobs
+@inject NavigationManager Navigation
+@inject PortalAuthService Auth
+
+<PageTitle>Windows Admin · @GetTitle()</PageTitle>
+
+<div class="shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-mark">WA</div>
+            <div>
+                <div class="brand-name">Windows Admin</div>
+                <div class="brand-sub">Local control portal</div>
+            </div>
+        </div>
+        <nav>
+            <NavLink href="" Match="NavLinkMatch.All">Dashboard</NavLink>
+            <NavLink href="check">Check & fix</NavLink>
+            <NavLink href="recommendations">Recommendations</NavLink>
+            <NavLink href="explorer">Explorer</NavLink>
+            <NavLink href="search">Search files</NavLink>
+            <NavLink href="updates">Windows Update</NavLink>
+            <NavLink href="apps">Applications</NavLink>
+            <NavLink href="storage">Storage</NavLink>
+            <NavLink href="performance">Performance</NavLink>
+            <NavLink href="processes">Processes</NavLink>
+            <NavLink href="events">Events</NavLink>
+            <NavLink href="health">Health report</NavLink>
+            <NavLink href="clock">Date and time</NavLink>
+            <NavLink href="tasks">System tasks</NavLink>
+            <NavLink href="scheduled-tasks">Scheduled tasks</NavLink>
+            <NavLink href="firewall">Firewall</NavLink>
+            <NavLink href="certificates">Certificates</NavLink>
+            <NavLink href="devices">Devices</NavLink>
+        </nav>
+        <div class="sidebar-foot">
+            <button class="btn ghost" @onclick="Lock">Lock</button>
+            <div class="muted">Web portal</div>
+            <code>http://127.0.0.1:5077</code>
+        </div>
+    </aside>
+    <div class="main @(IsExplorer ? "explorer-main" : "")">
+        <header class="topbar">
+            <div class="topbar-copy">
+                <div class="eyebrow">This PC · silent system tasks · no permission prompts</div>
+                <h1>@GetTitle()</h1>
+            </div>
+            <div class="topbar-tools">
+                <form class="top-search" @onsubmit="GoSearch" @onsubmit:preventDefault>
+                    <input class="search" placeholder="Search files on this PC…" @bind="TopQuery" @bind:event="oninput" />
+                    <button class="btn" type="submit">Search</button>
+                </form>
+                <div class="job-chip">
+                    @if (ActiveJob is not null)
+                    {
+                        <span class="pulse"></span>
+                        <span>@ActiveJob.Name · @ActiveJob.Percent%</span>
+                    }
+                    else
+                    {
+                        <span>Ready</span>
+                    }
+                </div>
+            </div>
+        </header>
+        <main class="content @(IsExplorer ? "explorer-content" : "")">
+            <ErrorBoundary>
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent>
+                    <section class="card">
+                        <h3>That action did not finish</h3>
+                        <p class="muted">The portal stayed open. Try the task again. Actions run silently and do not ask for permission prompts.</p>
+                        <a class="btn" href="@Navigation.Uri">Reload this page</a>
+                    </section>
+                </ErrorContent>
+            </ErrorBoundary>
+        </main>
+    </div>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unexpected error occurred.
+    <a href="" class="reload">Reload</a>
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private string TopQuery = "";
+    private AdminJob? ActiveJob => Jobs.Recent.FirstOrDefault(j => j.State == "Running");
+
+    protected override void OnInitialized() => _ = RefreshJobs();
+
+    private async Task RefreshJobs()
+    {
+        try
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(1500, _cts.Token);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // layout disposed
+        }
+    }
+
+    private bool IsExplorer => new Uri(Navigation.Uri).AbsolutePath.Trim('/').Equals("explorer", StringComparison.OrdinalIgnoreCase);
+
+    private string GetTitle() => new Uri(Navigation.Uri).AbsolutePath.Trim('/') switch
+    {
+        "" => "Dashboard",
+        "login" => "Unlock",
+        "check" => "Check & fix",
+        "recommendations" => "Recommendations",
+        "explorer" => "Explorer",
+        "search" => "Search files",
+        "updates" => "Windows Update",
+        "apps" => "Applications",
+        "storage" => "Storage management",
+        "performance" => "Performance",
+        "processes" => "Processes",
+        "events" => "Event log",
+        "health" => "Health report",
+        "clock" => "Date and time",
+        "tasks" => "System tasks",
+        "scheduled-tasks" => "Scheduled tasks",
+        "firewall" => "Firewall",
+        "certificates" => "Certificates",
+        "devices" => "Devices",
+        _ => "Windows Admin"
+    };
+
+    private void Lock()
+    {
+        Auth.SignOut();
+        Navigation.NavigateTo("/login", replace: true);
+    }
+
+    private void GoSearch()
+    {
+        var q = Uri.EscapeDataString(TopQuery ?? "");
+        Navigation.NavigateTo(string.IsNullOrWhiteSpace(TopQuery) ? "search" : $"search?q={q}", forceLoad: false);
+    }
+
+    public void Dispose() => _cts.Cancel();
+}

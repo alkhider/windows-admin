@@ -1,0 +1,74 @@
+@page "/events"
+@inject EventLogService EventsSvc
+@implements IDisposable
+
+<div class="toolbar">
+    <select @bind="LogName" @bind:after="Refresh">
+        <option value="System">System</option>
+        <option value="Application">Application</option>
+    </select>
+    <select @bind="Level" @bind:after="Refresh">
+        <option value="0">All levels</option>
+        <option value="1">Critical</option>
+        <option value="2">Error</option>
+        <option value="3">Warning</option>
+    </select>
+    <button class="btn ghost" @onclick="Refresh">Refresh now</button>
+    <label class="muted"><input type="checkbox" @bind="Live" /> Live refresh</label>
+</div>
+
+<section class="card">
+    <table>
+        <thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Message</th></tr></thead>
+        <tbody>
+        @foreach (var item in Items)
+        {
+            <tr>
+                <td>@item.Time.ToString("g")</td>
+                <td>@item.Level</td>
+                <td>@item.Source</td>
+                <td>@item.Message</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
+
+@code {
+    private List<EventItem> Items = [];
+    private string LogName = "System";
+    private int Level;
+    private bool Live = true;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        _ = Poll();
+    }
+
+    private void Refresh() => Items = EventsSvc.Query(LogName, Level).ToList();
+
+    private async Task Poll()
+    {
+        try
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                if (Live)
+                {
+                    Refresh();
+                    await InvokeAsync(StateHasChanged);
+                }
+
+                await Task.Delay(5000, _cts.Token);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // disposed
+        }
+    }
+
+    public void Dispose() => _cts.Cancel();
+}

@@ -1,0 +1,211 @@
+@page "/"
+@inject HealthService HealthSvc
+@inject LiveMetricsService MetricsSvc
+@inject RecommendationService Recs
+@inject NavigationManager Nav
+@implements IDisposable
+
+@if (Report is null)
+{
+    <div class="panel loading">Reading this PC…</div>
+}
+else
+{
+    <section class="hero">
+        <div class="hero-score">
+            <Gauge Label="Health" Value="Report.HealthScore" Unit="/100" Size="sm"
+                   Detail="@Report.HealthLabel" Scale="health" />
+        </div>
+        <div>
+            <h2>@Report.ComputerName</h2>
+            <p class="lede">@Report.Os.Caption · @Report.Hardware.Model</p>
+            <p class="muted">Signed in as @Report.UserName · up for @HealthReportFormatter.FormatUptime(Report.Uptime)</p>
+            <div class="actions" style="margin-top:14px">
+                <button class="btn accent" @onclick='() => Nav.NavigateTo("check")'>Check this PC</button>
+            </div>
+        </div>
+    </section>
+
+    @if (Tips.Count > 0)
+    {
+        <section class="card">
+            <div class="card-head">
+                <h3>Recommended for this PC</h3>
+                <a class="btn ghost" href="recommendations">See all</a>
+            </div>
+            <div class="rec-mini">
+                @foreach (var tip in Tips)
+                {
+                    <div class="rec-mini-item">
+                        <div>
+                            <strong>@tip.Title</strong>
+                            <div class="muted">@tip.Why</div>
+                        </div>
+                        <button class="btn ghost" @onclick='() => Nav.NavigateTo(tip.NavigateTo ?? "recommendations")'>@tip.ActionLabel</button>
+                    </div>
+                }
+            </div>
+        </section>
+    }
+
+    <section class="card">
+        <div class="card-head">
+            <h3>Search files</h3>
+            <a class="btn ghost" href="search">Open search page</a>
+        </div>
+        <div class="toolbar">
+            <input class="search wide" placeholder="Search this PC with Windows Search…" @bind="DashQuery" @bind:event="oninput" @onkeydown="OnSearchKey" />
+            <button class="btn" @onclick="GoSearch">Search</button>
+        </div>
+    </section>
+
+    @if (Live is not null)
+    {
+        <section class="gauge-board">
+            <article class="card gauge-card">
+                <Gauge Label="CPU" Value="Live.CpuPercent" Unit="%" Size="sm"
+                       Detail="@(Live.CpuFrequencyMhz > 0 ? $"{Live.CpuFrequencyMhz:N0} MHz" : "live")" />
+            </article>
+            <article class="card gauge-card">
+                <Gauge Label="Temp" Value="Live.CpuTempC" Max="105" Unit="°C" Size="sm" Scale="temp"
+                       Detail="@(Live.CpuTempC is null ? "No sensor" : Live.TemperatureStatus)" />
+            </article>
+            <article class="card gauge-card">
+                <Gauge Label="Memory" Value="Live.MemoryPercent" Unit="%" Size="sm"
+                       Detail="@StorageService.FormatBytes(Live.MemoryUsedBytes)" />
+            </article>
+            <article class="card gauge-card">
+                <Gauge Label="GPU" Value="Live.GpuPercent" Unit="%" Size="sm"
+                       Detail="@($"Disk {Live.DiskPercent}%")" />
+            </article>
+        </section>
+        <section class="card">
+            <div class="card-head">
+                <h3>Live snapshot</h3>
+                <a class="btn ghost" href="performance">Open performance</a>
+            </div>
+            <div class="muted">Top CPU: @(Live.TopProcessName ?? "—") @Live.TopProcessCpu.ToString("0.0")% · @Live.ProcessCount processes · @($"{StorageService.FormatBytes(Live.NetworkBytesPerSec)}/s net")</div>
+        </section>
+    }
+
+    <section class="grid-4">
+        <article class="card">
+            <div class="label">Processor</div>
+            <div class="value">@Report.Cpu.LoadPercent%</div>
+            <div class="meter"><span style="width:@Report.Cpu.LoadPercent%"></span></div>
+            <div class="muted">@Report.Cpu.LogicalProcessors logical processors</div>
+        </article>
+        <article class="card">
+            <div class="label">Memory</div>
+            <div class="value">@Report.Memory.UsedPercent%</div>
+            <div class="meter"><span style="width:@Report.Memory.UsedPercent%"></span></div>
+            <div class="muted">@StorageService.FormatBytes(Report.Memory.FreeBytes) free</div>
+        </article>
+        <article class="card">
+            <div class="label">Protection</div>
+            <div class="value">@(Report.Defender.RealTimeProtection ? "On" : "Off")</div>
+            <div class="muted">@Report.Defender.SignatureAge</div>
+        </article>
+        <article class="card">
+            <div class="label">Restart</div>
+            <div class="value">@(Report.PendingReboot ? "Pending" : "None")</div>
+            <div class="muted">@(Report.PendingReboot ? "Updates still need a restart" : "No reboot waiting")</div>
+        </article>
+    </section>
+
+    <section class="grid-2">
+        <article class="card">
+            <div class="card-head">
+                <h3>Findings</h3>
+                <a class="btn ghost" href="health">Full report</a>
+            </div>
+            <ul class="findings">
+                @foreach (var finding in Report.Findings)
+                {
+                    <li>@finding</li>
+                }
+            </ul>
+        </article>
+        <article class="card">
+            <div class="card-head">
+                <h3>Storage</h3>
+                <a class="btn ghost" href="storage">Manage</a>
+            </div>
+            @foreach (var drive in Report.Drives)
+            {
+                <div class="drive-row">
+                    <div>
+                        <strong>@drive.Name</strong> @drive.Label
+                    </div>
+                    <div class="muted">@StorageService.FormatBytes(drive.FreeBytes) free of @StorageService.FormatBytes(drive.TotalBytes)</div>
+                    <div class="meter"><span class="@(drive.UsedPercent >= 90 ? "hot" : "")" style="width:@drive.UsedPercent%"></span></div>
+                </div>
+            }
+        </article>
+    </section>
+
+    <section class="actions">
+        <button class="btn accent" @onclick='() => Nav.NavigateTo("check")'>Check this PC</button>
+        <button class="btn" @onclick='() => Nav.NavigateTo("search")'>Search files</button>
+        <button class="btn" @onclick='() => Nav.NavigateTo("updates")'>Check Windows updates</button>
+        <button class="btn ghost" @onclick='() => Nav.NavigateTo("recommendations")'>Recommendations</button>
+        <button class="btn ghost" @onclick='() => Nav.NavigateTo("performance")'>Performance</button>
+        <button class="btn ghost" @onclick='() => Nav.NavigateTo("processes")'>Processes</button>
+        <button class="btn ghost" @onclick='() => Nav.NavigateTo("events")'>Events</button>
+        <button class="btn ghost" @onclick="Refresh">Refresh health</button>
+    </section>
+}
+
+@code {
+    private HealthReport? Report;
+    private LiveMetrics? Live;
+    private List<RecommendationItem> Tips = [];
+    private string DashQuery = "";
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized()
+    {
+        Report = HealthSvc.GetReport();
+        Tips = Recs.GetRecommendations(3).ToList();
+        _ = SampleLoop();
+    }
+
+    private async Task SampleLoop()
+    {
+        try
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                Live = MetricsSvc.Sample();
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(1000, _cts.Token);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // disposed
+        }
+    }
+
+    private void Refresh()
+    {
+        Report = HealthSvc.GetReport();
+        Tips = Recs.GetRecommendations(3).ToList();
+    }
+
+    private void GoSearch()
+    {
+        var q = Uri.EscapeDataString(DashQuery ?? "");
+        Nav.NavigateTo(string.IsNullOrWhiteSpace(DashQuery) ? "search" : $"search?q={q}");
+    }
+
+    private void OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            GoSearch();
+        }
+    }
+
+    public void Dispose() => _cts.Cancel();
+}

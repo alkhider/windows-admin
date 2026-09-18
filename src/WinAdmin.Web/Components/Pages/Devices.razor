@@ -1,0 +1,33 @@
+@page "/devices"
+@inject DeviceService DeviceSvc
+
+<section class="card">
+    <p class="muted">Devices with a configuration problem (ConfigManagerErrorCode ≠ 0).</p>
+    @if (Items.Count == 0)
+    {
+        <p class="muted">No problem devices reported.</p>
+    }
+    else
+    {
+        <table>
+            <thead><tr><th>Name</th><th>Status</th><th>Problem code</th><th>Device ID</th></tr></thead>
+            <tbody>
+            @foreach (var device in Items)
+            {
+                <tr>
+                    <td>@device.Name</td>
+                    <td>@device.Status</td>
+                    <td>@device.ProblemCode</td>
+                    <td class="muted">@device.DeviceId</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</section>
+
+@code {
+    private List<DeviceItem> Items = [];
+
+    protected override void OnInitialized() => Items = DeviceSvc.ListProblemDevices().ToList();
+}

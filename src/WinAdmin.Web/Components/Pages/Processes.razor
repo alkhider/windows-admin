@@ -1,0 +1,122 @@
+@page "/processes"
+@inject ProcessService ProcessSvc
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<div class="toolbar">
+    <input class="search" placeholder="Filter processes" @bind="Filter" @bind:event="oninput" />
+    <label class="muted"><input type="checkbox" @bind="Live" /> Live (1s)</label>
+    <button class="btn ghost" @onclick="Refresh">Refresh</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+<section class="card">
+    <table>
+        <thead><tr><th>Name</th><th>PID</th><th>CPU</th><th>Memory</th><th>Disk</th><th>Threads</th><th>Path</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var proc in Visible)
+        {
+            <tr>
+                <td>@proc.Name</td>
+                <td>@proc.Id</td>
+                <td><CpuCell Percent="proc.CpuPercent" /></td>
+                <td>@StorageService.FormatBytes(proc.WorkingSetBytes)</td>
+                <td>@($"{StorageService.FormatBytes(proc.DiskBytesPerSec)}/s")</td>
+                <td>@proc.ThreadCount</td>
+                <td class="muted">@proc.Path</td>
+                <td>
+                    @if (ConfirmPid == proc.Id)
+                    {
+                        <button class="btn danger" @onclick="() => EndTask(proc.Id)">Confirm end</button>
+                        <button class="btn ghost" @onclick="() => ConfirmPid = null">Cancel</button>
+                    }
+                    else
+                    {
+                        <button class="btn ghost danger" @onclick="() => ConfirmPid = proc.Id">End task</button>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
+
+@code {
+    private List<ProcessItem> Items = [];
+    private int? ConfirmPid;
+    private string? Message;
+    private bool Ok;
+    private string Filter = "";
+    private bool Live = true;
+    private readonly CancellationTokenSource _cts = new();
+
+    private IEnumerable<ProcessItem> Visible =>
+        Items.Where(p => string.IsNullOrWhiteSpace(Filter)
+                         || p.Name.Contains(Filter, StringComparison.OrdinalIgnoreCase)
+                         || p.Path.Contains(Filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnInitialized()
+    {
+        var q = GetQueryParam("q");
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            Filter = q;
+        }
+
+        Refresh();
+        _ = Poll();
+    }
+
+    private string? GetQueryParam(string name)
+    {
+        var query = Navigation.ToAbsoluteUri(Navigation.Uri).Query.TrimStart('?');
+        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = part.Split('=', 2);
+            if (kv.Length == 2 && string.Equals(Uri.UnescapeDataString(kv[0]), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return Uri.UnescapeDataString(kv[1].Replace("+", " "));
+            }
+        }
+
+        return null;
+    }
+
+    private void Refresh() => Items = ProcessSvc.List().ToList();
+
+    private async Task Poll()
+    {
+        try
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                if (Live)
+                {
+                    Refresh();
+                    await InvokeAsync(StateHasChanged);
+                }
+
+                await Task.Delay(1000, _cts.Token);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // disposed
+        }
+    }
+
+    private void EndTask(int pid)
+    {
+        ConfirmPid = null;
+        var result = ProcessSvc.EndTask(pid);
+        Message = result.Message;
+        Ok = result.Ok;
+        Refresh();
+    }
+
+    public void Dispose() => _cts.Cancel();
+}

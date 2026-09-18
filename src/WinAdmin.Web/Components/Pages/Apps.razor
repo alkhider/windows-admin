@@ -1,0 +1,166 @@
+@page "/apps"
+@inject AppService AppSvc
+@inject JobService Jobs
+
+<div class="toolbar">
+    <input class="search" placeholder="Search installed apps" @bind="Filter" @bind:event="oninput" />
+    <input class="search" placeholder="Search winget catalog" @bind="CatalogQuery" />
+    <button class="btn" @onclick="SearchCatalog" disabled="@Busy">Find in catalog</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+<section class="card">
+    <h3>Suggested installs</h3>
+    <div class="chips">
+        @foreach (var app in AppService.SuggestedApps)
+        {
+            <button class="chip" @onclick="() => Install(app.Id, app.Name)" disabled="@Busy">@app.Name</button>
+        }
+    </div>
+</section>
+
+<section class="grid-2">
+    <article class="card">
+        <div class="card-head">
+            <h3>Installed applications</h3>
+            <span class="muted">@VisibleInstalled.Count</span>
+        </div>
+        <div class="list tall">
+            @foreach (var app in VisibleInstalled)
+            {
+                <div class="list-item">
+                    <div>
+                        <strong>@app.Name</strong>
+                        <div class="muted">@app.Publisher · @app.Version</div>
+                    </div>
+                    <button class="btn ghost danger" @onclick="() => Uninstall(app)" disabled="@Busy">Remove</button>
+                </div>
+            }
+        </div>
+    </article>
+    <article class="card">
+        <div class="card-head">
+            <h3>Catalog results</h3>
+            <span class="muted">Installs run silently through winget</span>
+        </div>
+        @if (Searching)
+        {
+            <div class="loading">Searching the catalog…</div>
+        }
+        else if (Catalog.Count == 0)
+        {
+            <p class="muted">Search for an app name or package ID, then install without opening a terminal.</p>
+        }
+        else
+        {
+            <div class="list tall">
+                @foreach (var app in Catalog)
+                {
+                    <div class="list-item">
+                        <div>
+                            <strong>@app.Name</strong>
+                            <div class="muted">@app.Id · @app.Version · @app.Source</div>
+                        </div>
+                        <button class="btn" @onclick="() => Install(app.Id, app.Name)" disabled="@Busy">Install</button>
+                    </div>
+                }
+            </div>
+        }
+    </article>
+</section>
+
+@code {
+    private List<InstalledApp> Installed = [];
+    private List<CatalogApp> Catalog = [];
+    private string Filter = "";
+    private string CatalogQuery = "";
+    private bool Searching;
+    private string? Message;
+    private bool Ok;
+    private bool Busy => Searching || Jobs.Recent.Any(j => j.State == "Running");
+    private IReadOnlyList<InstalledApp> VisibleInstalled =>
+        Installed.Where(a => string.IsNullOrWhiteSpace(Filter) ||
+                             a.Name.Contains(Filter, StringComparison.OrdinalIgnoreCase) ||
+                             a.Publisher.Contains(Filter, StringComparison.OrdinalIgnoreCase))
+                 .ToList();
+
+    protected override void OnInitialized() => Installed = AppSvc.GetInstalled().ToList();
+
+    private async Task SearchCatalog()
+    {
+        Searching = true;
+        try
+        {
+            Catalog = (await AppSvc.SearchAsync(CatalogQuery)).ToList();
+            Message = Catalog.Count == 0 ? "No catalog matches." : $"Found {Catalog.Count} package(s).";
+            Ok = Catalog.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            Message = ex.Message;
+            Ok = false;
+        }
+        finally
+        {
+            Searching = false;
+        }
+    }
+
+    private void Install(string id, string name)
+    {
+        Message = $"Installing {name} in the background.";
+        Ok = true;
+        Jobs.Start($"Install {name}", async (progress, _) =>
+        {
+            try
+            {
+                var result = await AppSvc.InstallAsync(id, progress);
+                await InvokeAsync(() =>
+                {
+                    Message = result.Message;
+                    Ok = result.Ok;
+                    Installed = AppSvc.GetInstalled().ToList();
+                });
+            }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() =>
+                {
+                    Message = ex.Message;
+                    Ok = false;
+                });
+            }
+        });
+    }
+
+    private void Uninstall(InstalledApp app)
+    {
+        Message = $"Removing {app.Name} silently. No permission prompt will be shown.";
+        Ok = true;
+        Jobs.Start($"Remove {app.Name}", async (progress, _) =>
+        {
+            try
+            {
+                var result = await AppSvc.UninstallAsync(app, progress);
+                await InvokeAsync(() =>
+                {
+                    Message = result.Message;
+                    Ok = result.Ok;
+                    Installed = AppSvc.GetInstalled().ToList();
+                });
+            }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() =>
+                {
+                    Message = ex.Message;
+                    Ok = false;
+                });
+            }
+        });
+    }
+}

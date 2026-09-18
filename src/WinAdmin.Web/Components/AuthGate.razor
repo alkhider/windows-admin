@@ -1,0 +1,57 @@
+@inject PortalAuthService Auth
+@inject NavigationManager Nav
+@implements IDisposable
+
+@if (Allow)
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool Allow;
+
+    protected override void OnInitialized()
+    {
+        Auth.Changed += OnChanged;
+        Apply();
+    }
+
+    protected override void OnParametersSet() => Apply();
+
+    private void OnChanged() => InvokeAsync(() =>
+    {
+        Apply();
+        StateHasChanged();
+    });
+
+    private void Apply()
+    {
+        var path = new Uri(Nav.Uri).AbsolutePath.TrimEnd('/');
+        var login = path.Equals("/login", StringComparison.OrdinalIgnoreCase);
+        if (Auth.IsSignedIn)
+        {
+            if (login)
+            {
+                Allow = false;
+                Nav.NavigateTo("/", replace: true);
+                return;
+            }
+
+            Allow = true;
+            return;
+        }
+
+        if (login)
+        {
+            Allow = true;
+            return;
+        }
+
+        Allow = false;
+        Nav.NavigateTo("/login", replace: true);
+    }
+
+    public void Dispose() => Auth.Changed -= OnChanged;
+}

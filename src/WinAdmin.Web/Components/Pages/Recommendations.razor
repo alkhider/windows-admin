@@ -1,0 +1,126 @@
+@page "/recommendations"
+@inject RecommendationService Recs
+@inject StorageSenseService SenseSvc
+@inject StorageService StorageSvc
+@inject SystemTaskService TaskSvc
+@inject JobService Jobs
+@inject NavigationManager Nav
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+<section class="card">
+    <div class="card-head">
+        <h3>Smart recommendations</h3>
+        <span class="muted">On this PC only · ML.NET ranks Windows signals</span>
+    </div>
+    <p class="muted">Suggestions come from disk, CPU, memory, Defender, events, and updates. Dismiss or run an action to teach the local ranker. Nothing leaves this machine.</p>
+</section>
+
+@if (Items.Count == 0)
+{
+    <div class="panel loading">Scoring this PC…</div>
+}
+else
+{
+    <section class="rec-list">
+        @foreach (var item in Items)
+        {
+            <article class="card rec-card">
+                <div class="rec-head">
+                    <div>
+                        <div class="label">@item.Source · @Confidence(item)</div>
+                        <h3>@item.Title</h3>
+                    </div>
+                    <div class="reading-bar slim rec-conf">
+                        <span style="width:@($"{Math.Clamp(item.Confidence * 100, 8, 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%")"></span>
+                    </div>
+                </div>
+                <p class="muted">@item.Why</p>
+                <div class="actions">
+                    @if (ConfirmId == item.Id)
+                    {
+                        <button class="btn accent" @onclick="() => Run(item, confirmed: true)">Confirm</button>
+                        <button class="btn ghost" @onclick="() => ConfirmId = null">Cancel</button>
+                    }
+                    else
+                    {
+                        <button class="btn accent" @onclick="() => Run(item, confirmed: false)">@item.ActionLabel</button>
+                        <button class="btn ghost" @onclick="() => Dismiss(item)">Dismiss</button>
+                    }
+                </div>
+            </article>
+        }
+    </section>
+}
+
+@code {
+    private List<RecommendationItem> Items = [];
+    private string? ConfirmId;
+    private string? Message;
+    private bool Ok;
+
+    protected override void OnInitialized() => Reload();
+
+    private void Reload() => Items = Recs.GetRecommendations().ToList();
+
+    private static string Confidence(RecommendationItem item) =>
+        $"{Math.Clamp(item.Confidence * 100, 0, 99):0}% confidence";
+
+    private void Dismiss(RecommendationItem item)
+    {
+        Recs.RecordFeedback(item, accepted: false);
+        Message = "Dismissed. This type will rank lower on this PC.";
+        Ok = true;
+        ConfirmId = null;
+        Reload();
+    }
+
+    private void Run(RecommendationItem item, bool confirmed)
+    {
+        if (item.NeedsConfirm && !confirmed)
+        {
+            ConfirmId = item.Id;
+            return;
+        }
+
+        ConfirmId = null;
+        Recs.RecordFeedback(item, accepted: true);
+
+        if (item.Action == "storage-sense")
+        {
+            Message = "Starting Storage Sense…";
+            Ok = true;
+            Jobs.Start("Storage Sense", async (_, _) =>
+            {
+                var result = await SenseSvc.RunCleanupAsync();
+                await InvokeAsync(() =>
+                {
+                    Message = result.Message;
+                    Ok = result.Ok;
+                });
+            });
+            return;
+        }
+
+        if (item.Action == "reboot")
+        {
+            _ = ConfirmReboot();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.NavigateTo))
+        {
+            Nav.NavigateTo(item.NavigateTo);
+        }
+    }
+
+    private async Task ConfirmReboot()
+    {
+        var result = await TaskSvc.RestartAsync();
+        Message = result.Message;
+        Ok = result.Ok;
+    }
+}

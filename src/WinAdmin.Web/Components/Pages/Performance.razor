@@ -1,0 +1,163 @@
+@page "/performance"
+@inject LiveMetricsService MetricsSvc
+@inject ProcessService ProcessSvc
+@implements IDisposable
+
+@if (Live is null)
+{
+    <div class="panel loading">Reading live counters…</div>
+}
+else
+{
+    <div class="card-head" style="margin:0 2px 4px">
+        <div class="eyebrow" style="display:flex;gap:8px;align-items:center">
+            <span class="live-dot"></span>
+            Live readings · 1 second
+        </div>
+        <div class="actions" style="margin:0">
+            <a class="btn accent" href="check">Check & fix</a>
+            <a class="btn ghost" href="processes">All processes</a>
+        </div>
+    </div>
+
+    <section class="gauge-board">
+        <article class="card gauge-card">
+            <Gauge Label="CPU" Value="Live.CpuPercent" Unit="%"
+                   Detail="@(Live.CpuFrequencyMhz > 0 ? $"{Live.CpuFrequencyMhz:N0} MHz · {Environment.ProcessorCount} threads" : $"{Environment.ProcessorCount} logical processors")" />
+        </article>
+        <article class="card gauge-card">
+            <Gauge Label="Temperature" Value="Live.CpuTempC" Max="105" Unit="°C" Scale="temp"
+                   Detail="@(Live.CpuTempC is null ? "No Windows thermal sensor" : Live.TemperatureStatus)" />
+        </article>
+        <article class="card gauge-card">
+            <Gauge Label="Memory" Value="Live.MemoryPercent" Unit="%"
+                   Detail="@($"{StorageService.FormatBytes(Live.MemoryUsedBytes)} of {StorageService.FormatBytes(Live.MemoryTotalBytes)}")" />
+        </article>
+        <article class="card gauge-card">
+            <Gauge Label="GPU" Value="Live.GpuPercent" Unit="%"
+                   Detail="3D / compute engines" />
+        </article>
+    </section>
+
+    <section class="gauge-board">
+        <article class="card gauge-card">
+            <Gauge Label="Disk" Value="Live.DiskPercent" Unit="%" Size="sm"
+                   Detail="@($"{StorageService.FormatBytes(Live.DiskBytesPerSec)}/s · queue {Live.DiskQueue}")" />
+        </article>
+        <article class="card reading-card">
+            <Reading Label="Network" Value="@StorageService.FormatBytes(Live.NetworkBytesPerSec)" Unit="/s"
+                     Detail="Total across active adapters" Bar="NetBar" Tone="@(NetBar >= 80 ? "warm" : "good")" />
+        </article>
+        <article class="card reading-card">
+            <Reading Label="Processes" Value="@Live.ProcessCount.ToString("N0")"
+                     Detail="@($"{Live.ThreadCount:N0} threads · {Live.HandleCount:N0} handles")" />
+        </article>
+        <article class="card reading-card">
+            <Reading Label="Top CPU" Value="@ShortProc(Live.TopProcessName)" Unit=""
+                     Detail="@($"{Live.TopProcessCpu:0.0}% of all processors")" Bar="Live.TopProcessCpu"
+                     Tone="@(Live.TopProcessCpu >= 80 ? "hot" : Live.TopProcessCpu >= 50 ? "warm" : "good")" />
+        </article>
+    </section>
+
+    @if (Live.ThermalZones.Count > 0)
+    {
+        <section class="card">
+            <div class="card-head">
+                <h3>Thermal zones</h3>
+                <span class="muted">Hottest @(Live.CpuTempC)°C</span>
+            </div>
+            <div class="thermal-list">
+                @foreach (var zone in Live.ThermalZones)
+                {
+                    var width = Math.Clamp(zone.Celsius, 0, 105) * 100d / 105d;
+                    <div class="thermal-row">
+                        <div>
+                            <strong>@ShortName(zone.Name)</strong>
+                            <div class="muted">@zone.Source</div>
+                        </div>
+                        <div class="thermal-temp @(zone.Celsius >= 85 ? "danger" : "")">@zone.Celsius°C</div>
+                        <div class="reading-bar">
+                            <span class="@(zone.Celsius >= 85 ? "hot" : zone.Celsius >= 70 ? "warm" : "")"
+                                  style="width:@($"{width.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}%")"></span>
+                        </div>
+                    </div>
+                }
+            </div>
+        </section>
+    }
+    else
+    {
+        <div class="banner warn">@Live.TemperatureStatus Some PCs only expose temperature through OEM tools, not Windows sensors.</div>
+    }
+
+    <section class="card">
+        <div class="card-head">
+            <h3>Active processes</h3>
+            <span class="muted">Sorted by CPU</span>
+        </div>
+        <table class="proc-table">
+            <thead>
+            <tr>
+                <th>Name</th>
+                <th>PID</th>
+                <th>CPU</th>
+                <th>Memory</th>
+                <th>Disk</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var proc in TopProcesses)
+            {
+                <tr>
+                    <td>@proc.Name</td>
+                    <td class="muted">@proc.Id</td>
+                    <td><CpuCell Percent="proc.CpuPercent" /></td>
+                    <td>@StorageService.FormatBytes(proc.WorkingSetBytes)</td>
+                    <td>@($"{StorageService.FormatBytes(proc.DiskBytesPerSec)}/s")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+    private LiveMetrics? Live;
+    private List<ProcessItem> TopProcesses = [];
+    private readonly CancellationTokenSource _cts = new();
+    private double NetBar => Live is null ? 0 : Math.Clamp(Live.NetworkBytesPerSec / (50d * 1024 * 1024) * 100, 0, 100);
+
+    protected override void OnInitialized() => _ = Loop();
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                Live = MetricsSvc.Sample();
+                TopProcesses = ProcessSvc.List().Take(12).ToList();
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(1000, _cts.Token);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // disposed
+        }
+    }
+
+    private static string ShortProc(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "—";
+        return name.Length <= 16 ? name : name[..16] + "…";
+    }
+
+    private static string ShortName(string name)
+    {
+        var cleaned = name.Replace(@"\_TZ.", "").Replace(@"_TZ.", "");
+        return cleaned.Length <= 42 ? cleaned : cleaned[..42] + "…";
+    }
+
+    public void Dispose() => _cts.Cancel();
+}

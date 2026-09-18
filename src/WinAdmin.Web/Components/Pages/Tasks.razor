@@ -1,0 +1,104 @@
+@page "/tasks"
+@inject SystemTaskService TaskSvc
+
+<div class="toolbar">
+    <button class="btn" @onclick="Restart">Restart in 60 seconds</button>
+    <button class="btn ghost" @onclick="Shutdown">Shut down in 60 seconds</button>
+    <button class="btn accent" @onclick="Cancel">Cancel restart / shutdown</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="banner @(Ok ? "ok" : "warn")">@Message</div>
+}
+
+<section class="grid-2">
+    <article class="card">
+        <div class="card-head">
+            <h3>Services</h3>
+            <input class="search" placeholder="Filter services" @bind="ServiceFilter" @bind:event="oninput" />
+        </div>
+        <div class="list tall">
+            @foreach (var service in VisibleServices)
+            {
+                <div class="list-item">
+                    <div>
+                        <strong>@service.DisplayName</strong>
+                        <div class="muted">@service.Name · @service.Status · @service.StartType</div>
+                    </div>
+                    @if (service.Status == "Running")
+                    {
+                        <button class="btn ghost danger" @onclick="() => ToggleService(service.Name, false)">Stop</button>
+                    }
+                    else
+                    {
+                        <button class="btn ghost" @onclick="() => ToggleService(service.Name, true)">Start</button>
+                    }
+                </div>
+            }
+        </div>
+    </article>
+    <article class="card">
+        <h3>Startup programs</h3>
+        <div class="list tall">
+            @foreach (var item in Startup)
+            {
+                <div class="list-item">
+                    <div>
+                        <strong>@item.Name</strong>
+                        <div class="muted">@item.Location · @item.Command</div>
+                    </div>
+                </div>
+            }
+        </div>
+    </article>
+</section>
+
+@code {
+    private List<ServiceItem> Services = [];
+    private List<StartupItem> Startup = [];
+    private string ServiceFilter = "";
+    private string? Message;
+    private bool Ok;
+
+    private IEnumerable<ServiceItem> VisibleServices =>
+        Services.Where(s => string.IsNullOrWhiteSpace(ServiceFilter) ||
+                            s.DisplayName.Contains(ServiceFilter, StringComparison.OrdinalIgnoreCase) ||
+                            s.Name.Contains(ServiceFilter, StringComparison.OrdinalIgnoreCase))
+                .Take(80);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Services = TaskSvc.GetServices().ToList();
+        Startup = (await TaskSvc.GetStartupItemsAsync()).ToList();
+    }
+
+    private async Task Restart()
+    {
+        var result = await TaskSvc.RestartAsync();
+        Message = result.Message;
+        Ok = result.Ok;
+    }
+
+    private async Task Shutdown()
+    {
+        var result = await TaskSvc.ShutdownAsync();
+        Message = result.Message;
+        Ok = result.Ok;
+    }
+
+    private async Task Cancel()
+    {
+        var result = await TaskSvc.CancelPowerAsync();
+        Message = result.Message;
+        Ok = result.Ok;
+    }
+
+    private void ToggleService(string name, bool start)
+    {
+        var result = TaskSvc.SetServiceRunning(name, start);
+        Message = result.Message;
+        Ok = result.Ok;
+        Services = TaskSvc.GetServices().ToList();
+    }
+}
